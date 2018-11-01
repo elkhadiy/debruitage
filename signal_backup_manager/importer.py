@@ -8,6 +8,9 @@ import subprocess
 from fs.tempfs import TempFS
 import importlib.util
 
+import sqlite3
+import ctypes
+
 class SignalBackupImporter():
 
     def __protoBackupsLoader(self):
@@ -36,8 +39,11 @@ class SignalBackupImporter():
         self.__protoBackupsLoader()
 
         self.ressource_folder = TempFS()
+
         self.attachments_folder = self.ressource_folder.makedir('attachments', recreate=True)
         self.avatars_folder = self.ressource_folder.makedir('avatars', recreate=True)
+        self.db_connection = sqlite3.connect(self.ressource_folder.getospath('/').decode('utf-8') + 'backup.db')
+        self.db_cursor = self.db_connection.cursor()
 
         self.file = open(bkp_file, 'rb')
 
@@ -49,8 +55,6 @@ class SignalBackupImporter():
 
         self.cipher_counter = int.from_bytes(self.iv[:4], byteorder='big')
 
-        self.db_version = 0
-        self.db_statements = []
         self.db_preferences = []
         self.db_attachments = []
         self.db_avatars = []
@@ -75,6 +79,8 @@ class SignalBackupImporter():
             if frame.HasField('end'):
                 break
 
+        self.db_connection.commit()
+
         self.file.close()
 
     def __read_iv_and_salt(self):
@@ -96,7 +102,7 @@ class SignalBackupImporter():
         digest = hashes.Hash(hashes.SHA512(), backend=default_backend())
         digest.update(salt)
 
-        for k in range(250000):
+        for _ in range(250000):
             digest.update(h + i)
             h = digest.finalize()
             digest = hashes.Hash(hashes.SHA512(), backend=default_backend())
@@ -162,11 +168,27 @@ class SignalBackupImporter():
 
     def __handle_version(self, version):
 
-        self.db_version = version
+        self.db_cursor.execute('PRAGMA user_version = {};'.format(version.version))
 
     def __handle_statement(self, statement):
 
-        self.db_statements.append(statement)
+        params = ()
+        for param in statement.parameters:
+            if param.HasField('stringParamter'):
+                params += (param.stringParamter,)  
+            if param.HasField('doubleParameter'):
+                params += (param.doubleParameter,)
+            if param.HasField('integerParameter'):
+                if param.integerParameter > 2 ** 63:
+                    params += (ctypes.c_long(param.integerParameter).value,)
+                else:
+                    params += (param.integerParameter,)
+            if param.HasField('blobParameter'):
+                params += (param.blobParameter,)
+            if param.HasField('nullparameter'):
+                params += (param.nullparameter,)
+
+        self.db_cursor.execute(statement.statement, params)
 
     def __handle_preference(self, preference):
 
@@ -184,7 +206,7 @@ class SignalBackupImporter():
 
         self.db_attachments.append(attachment)
         attachment_data = self.__handle_ressource(attachment)
-        file_name = str(attachment.rowId) + "_" + str(attachment.attachmentId)
+        file_name = str(attachment.attachmentId)
         with self.attachments_folder.open(file_name, 'wb') as f:
             f.write(attachment_data)
 
@@ -198,4 +220,5 @@ class SignalBackupImporter():
 
     def __del__(self):
 
+        self.db_connection.close()
         self.attachments_folder.close()
