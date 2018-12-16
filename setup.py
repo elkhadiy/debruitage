@@ -27,6 +27,8 @@ setup(
     install_requires=install_requires,
 
     entry_points={
-
+        'console_scripts': [
+            'signal-bkp-decrypt=signal_backup_manager.cli:run'
+        ]
     }
 )

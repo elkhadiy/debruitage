@@ -3,46 +3,36 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
-import requests
-import subprocess
-from fs.tempfs import TempFS
-import importlib.util
+from datetime import datetime
+from fs import open_fs
 
 import sqlite3
 import ctypes
 
-class SignalBackupImporter():
+import signal_backup_manager.Backups_pb2 as Backups_pb2
 
-    def __protoBackupsLoader(self):
 
-        BACKUPS_PROTO_URI = "https://raw.githubusercontent.com/signalapp/Signal-Android/master/protobuf/Backups.proto"
-
-        r = requests.get(BACKUPS_PROTO_URI)
-        with TempFS() as tmp_fs:
-            with tmp_fs.open('Backups.proto', 'w') as bkp_proto_file:
-                bkp_proto_file.write(r.text)
-            tmp_fs_path = tmp_fs.getospath('/').decode('utf-8')
-            subprocess.run([
-                'protoc',
-                '--proto_path=' + tmp_fs_path,
-                '--python_out=' + tmp_fs_path,
-                'Backups.proto'
-            ])
-            spec = importlib.util.spec_from_file_location(
-                'Backups_pb2', tmp_fs.getospath('Backups_pb2.py').decode('utf-8')
-            )
-            self.Backups_pb2 = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(self.Backups_pb2)
+class SignalBackup():
 
     def __init__(self, bkp_file, passphrase):
 
-        self.__protoBackupsLoader()
+        self.ressource_folder = open_fs('osfs://.').makedir(
+                            'Signal_Backup_Data_' + datetime.now().isoformat()
+                            )
 
-        self.ressource_folder = TempFS()
+        self.attachments_folder = self.ressource_folder.makedir(
+                                                'attachments', recreate=True)
 
-        self.attachments_folder = self.ressource_folder.makedir('attachments', recreate=True)
-        self.avatars_folder = self.ressource_folder.makedir('avatars', recreate=True)
-        self.db_connection = sqlite3.connect(self.ressource_folder.getospath('/').decode('utf-8') + 'backup.db')
+        self.avatars_folder = self.ressource_folder.makedir(
+                                                'avatars', recreate=True)
+
+        self.preference_file = self.ressource_folder.open('preferences', 'w')
+
+        self.db_connection = sqlite3.connect(
+                        self.ressource_folder.getospath('/').decode('utf-8')
+                        + '/backup.db'
+                        )
+
         self.db_cursor = self.db_connection.cursor()
 
         self.file = open(bkp_file, 'rb')
@@ -54,10 +44,6 @@ class SignalBackupImporter():
         self.cipher_key, self.mac_key = self.__derive_cipher_and_mac_keys(key)
 
         self.cipher_counter = int.from_bytes(self.iv[:4], byteorder='big')
-
-        self.db_preferences = []
-        self.db_attachments = []
-        self.db_avatars = []
 
         for frame in self.__get_backup_frames():
 
@@ -89,7 +75,7 @@ class SignalBackupImporter():
         header_length = int.from_bytes(header_length_bytes, byteorder='big')
         header_frame = self.file.read(header_length)
 
-        frame = self.Backups_pb2.BackupFrame()
+        frame = Backups_pb2.BackupFrame()
         frame.ParseFromString(header_frame)
 
         return frame.header.iv, frame.header.salt
@@ -132,7 +118,7 @@ class SignalBackupImporter():
 
             plaintext = self.__decrypt_frame(frame_enc, frame_mac)
 
-            frame = self.Backups_pb2.BackupFrame()
+            frame = Backups_pb2.BackupFrame()
             frame.ParseFromString(plaintext)
 
             yield frame
@@ -168,14 +154,16 @@ class SignalBackupImporter():
 
     def __handle_version(self, version):
 
-        self.db_cursor.execute('PRAGMA user_version = {};'.format(version.version))
+        self.db_cursor.execute(
+                            'PRAGMA user_version = {};'.format(version.version)
+                            )
 
     def __handle_statement(self, statement):
 
         params = ()
         for param in statement.parameters:
             if param.HasField('stringParamter'):
-                params += (param.stringParamter,)  
+                params += (param.stringParamter,)
             if param.HasField('doubleParameter'):
                 params += (param.doubleParameter,)
             if param.HasField('integerParameter'):
@@ -192,7 +180,7 @@ class SignalBackupImporter():
 
     def __handle_preference(self, preference):
 
-        self.db_preferences.append(preference)
+        self.preference_file.write(str(preference) + '\n')
 
     def __handle_ressource(self, res):
 
@@ -204,7 +192,6 @@ class SignalBackupImporter():
 
     def __handle_attachment(self, attachment):
 
-        self.db_attachments.append(attachment)
         attachment_data = self.__handle_ressource(attachment)
         file_name = str(attachment.attachmentId)
         with self.attachments_folder.open(file_name, 'wb') as f:
@@ -212,7 +199,6 @@ class SignalBackupImporter():
 
     def __handle_avatar(self, avatar):
 
-        self.db_avatars.append(avatar)
         avatar_data = self.__handle_ressource(avatar)
         file_name = avatar.name
         with self.avatars_folder.open(file_name, 'wb') as f:
@@ -220,5 +206,6 @@ class SignalBackupImporter():
 
     def __del__(self):
 
+        self.preference_file.close()
         self.db_connection.close()
-        self.attachments_folder.close()
+        self.ressource_folder.close()
