@@ -118,10 +118,20 @@ class SignalBackup():
             frame_enc = self.file.read(frame_length - 10)
             frame_mac = self.file.read(10)
 
-            plaintext = self.__decrypt_frame(frame_enc, frame_mac)
+            valid, plaintext = self.__decrypt_frame(frame_enc, frame_mac)
+
+            if not valid:
+                print('Bad frame @ file offset', self.file.tell())
+                print('Raw Frame data:')
+                print(plaintext)
+                print('Attempting to build frame obj:')
 
             frame = Backups_pb2.BackupFrame()
             frame.ParseFromString(plaintext)
+
+            if not valid:
+                print('Built:')
+                print(frame)
 
             yield frame
 
@@ -141,8 +151,10 @@ class SignalBackup():
         mac.update(frame_enc)
         mac = mac.finalize()
 
+        valid = True
         if frame_mac != mac[:10]:
-            raise ValueError('Invalid MAC')
+            # raise ValueError('Invalid MAC')
+            valid = False
 
         cipher = Cipher(
             algorithms.AES(self.cipher_key),
@@ -152,7 +164,7 @@ class SignalBackup():
 
         plaintext = cipher.update(frame_enc) + cipher.finalize()
 
-        return plaintext
+        return valid, plaintext
 
     def __handle_version(self, version):
 
@@ -188,13 +200,18 @@ class SignalBackup():
 
         res_enc = self.file.read(res.length)
         res_mac = self.file.read(10)
-        res_plaintext = self.__decrypt_frame(res_enc, res_mac, file=True)
+        valid, res_plaintext = self.__decrypt_frame(
+                                                res_enc, res_mac, file=True)
 
-        return res_plaintext
+        return valid, res_plaintext
 
     def __handle_attachment(self, attachment):
 
-        attachment_data = self.__handle_ressource(attachment)
+        valid, attachment_data = self.__handle_ressource(attachment)
+
+        if not valid:
+            print('Invalid attachment', attachment)
+
         file_extension = filetype.guess_extension(attachment_data)
         file_name = str(attachment.attachmentId)
         if file_extension:
@@ -204,7 +221,11 @@ class SignalBackup():
 
     def __handle_avatar(self, avatar):
 
-        avatar_data = self.__handle_ressource(avatar)
+        valid, avatar_data = self.__handle_ressource(avatar)
+
+        if not valid:
+            print('Invalid avatar', avatar)
+
         file_extension = filetype.guess_extension(avatar_data)
         file_name = avatar.name
         if file_extension:
