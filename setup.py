@@ -8,6 +8,7 @@ install_requires = [
     'cryptography>=2.3.1',
     'requests>=2.18.4',
     'fs>=2.1.1',
+    'filetype>=1.0.1',
 
 ]
 

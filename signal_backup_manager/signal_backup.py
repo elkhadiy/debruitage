@@ -8,6 +8,7 @@ from fs import open_fs
 
 import sqlite3
 import ctypes
+import filetype
 
 import signal_backup_manager.Backups_pb2 as Backups_pb2
 
@@ -17,7 +18,8 @@ class SignalBackup():
     def __init__(self, bkp_file, passphrase):
 
         self.ressource_folder = open_fs('osfs://.').makedir(
-                            'Signal_Backup_Data_' + datetime.now().isoformat()
+                                'Signal_Backup_Data_'
+                                + datetime.now().strftime("%Y-%m-%d--%H-%M-%S")
                             )
 
         self.attachments_folder = self.ressource_folder.makedir(
@@ -193,14 +195,20 @@ class SignalBackup():
     def __handle_attachment(self, attachment):
 
         attachment_data = self.__handle_ressource(attachment)
+        file_extension = filetype.guess_extension(attachment_data)
         file_name = str(attachment.attachmentId)
+        if file_extension:
+            file_name += '.' + file_extension
         with self.attachments_folder.open(file_name, 'wb') as f:
             f.write(attachment_data)
 
     def __handle_avatar(self, avatar):
 
         avatar_data = self.__handle_ressource(avatar)
+        file_extension = filetype.guess_extension(avatar_data)
         file_name = avatar.name
+        if file_extension:
+            file_name += '.' + file_extension
         with self.avatars_folder.open(file_name, 'wb') as f:
             f.write(avatar_data)
 
