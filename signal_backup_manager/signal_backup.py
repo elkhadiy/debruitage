@@ -1,6 +1,6 @@
 from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.backends.openssl import backend
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from datetime import datetime
@@ -87,13 +87,13 @@ class SignalBackup():
         i = bytes(passphrase, encoding='utf-8')
         h = i
 
-        digest = hashes.Hash(hashes.SHA512(), backend=default_backend())
+        digest = hashes.Hash(hashes.SHA512(), backend=backend)
         digest.update(salt)
 
         for _ in range(250000):
             digest.update(h + i)
             h = digest.finalize()
-            digest = hashes.Hash(hashes.SHA512(), backend=default_backend())
+            digest = hashes.Hash(hashes.SHA512(), backend=backend)
 
         return h[:32]
 
@@ -104,7 +104,7 @@ class SignalBackup():
             length=64,
             salt=None,
             info=bytes('Backup Export', encoding='utf-8'),
-            backend=default_backend()
+            backend=backend
         ).derive(key)
 
         return derived[0:32], derived[32:64]
@@ -144,7 +144,7 @@ class SignalBackup():
         mac = hmac.HMAC(
             self.mac_key,
             hashes.SHA256(),
-            backend=default_backend()
+            backend=backend
         )
         if file:
             mac.update(self.iv)
@@ -159,7 +159,7 @@ class SignalBackup():
         cipher = Cipher(
             algorithms.AES(self.cipher_key),
             modes.CTR(self.iv),
-            backend=default_backend()
+            backend=backend
         ).decryptor()
 
         plaintext = cipher.update(frame_enc) + cipher.finalize()
