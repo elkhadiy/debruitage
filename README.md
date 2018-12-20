@@ -1,6 +1,6 @@
 # Débruitage
 
 ```bash
-$ pip install .
+$ pip3 install .
 $ signal-bkp-decrypt -b path/to/bkp -p 'XXXXXXXX...'
 ```
